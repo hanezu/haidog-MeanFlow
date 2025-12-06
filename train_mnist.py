@@ -14,7 +14,7 @@ if __name__ == '__main__':
     # Hyperparameters for MNIST training
     n_steps = 10000
     # device = "cuda" if torch.cuda.is_available() else "cpu" # Handled by Accelerator
-    batch_size = 128 # Increased batch size for MNIST as it's smaller
+    batch_size = 32 # Fit in a T4: ~14GB GPU memory
     image_size = 32
     
     os.makedirs('images_mnist', exist_ok=True)

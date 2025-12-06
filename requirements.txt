@@ -1,0 +1,9 @@
+accelerate
+diffusers
+einops
+numpy
+Pillow
+timm
+torch
+torchvision
+tqdm
