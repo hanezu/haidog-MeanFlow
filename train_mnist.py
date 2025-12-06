@@ -1,3 +1,4 @@
+import argparse
 from models.dit import MFDiT
 import torch
 import torchvision
@@ -11,10 +12,24 @@ import os
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Train MeanFlow on MNIST")
+    parser.add_argument("--n_steps", type=int, default=10000, help="Number of training steps")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+    parser.add_argument("--stage0_t_method", type=str, default="lognorm", help="Method for sampling t")
+    parser.add_argument("--stage0_t_mu", type=float, default=-0.4, help="Mu for t lognorm")
+    parser.add_argument("--stage0_t_sigma", type=float, default=1.0, help="Sigma for t lognorm")
+    parser.add_argument("--stage0_r_method", type=str, default="lognorm", help="Method for sampling r")
+    parser.add_argument("--stage0_r_lognorm_mu", type=float, default=-0.4, help="Mu for r lognorm")
+    parser.add_argument("--stage0_r_lognorm_sigma", type=float, default=1.0, help="Sigma for r lognorm")
+    parser.add_argument("--stage0_instant_prob", type=float, default=0.50, help="Probability of instant flow (flow_ratio)")
+    parser.add_argument("--stage0_resample", action="store_true", help="Enable resampling for ordering")
+    
+    args = parser.parse_args()
+
     # Hyperparameters for MNIST training
-    n_steps = 10000
+    n_steps = args.n_steps
     # device = "cuda" if torch.cuda.is_available() else "cpu" # Handled by Accelerator
-    batch_size = 32 # Fit in a T4: ~14GB GPU memory
+    batch_size = args.batch_size # batch_size=32 fits in a T4: ~14GB GPU memory
     image_size = 32
     
     os.makedirs('images_mnist', exist_ok=True)
@@ -56,13 +71,26 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.0)
 
+    # Configure distributions from args
+    t_dist = [args.stage0_t_method]
+    if args.stage0_t_method == 'lognorm':
+        t_dist.extend([args.stage0_t_mu, args.stage0_t_sigma])
+        
+    r_dist = [args.stage0_r_method]
+    if args.stage0_r_method == 'lognorm':
+        r_dist.extend([args.stage0_r_lognorm_mu, args.stage0_r_lognorm_sigma])
+
+    print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
+
     # MeanFlow setup
     meanflow = MeanFlow(
         channels=1, # MNIST is grayscale
         image_size=image_size,
         num_classes=10,
-        flow_ratio=0.50,
-        time_dist=['lognorm', -0.4, 1.0],
+        flow_ratio=args.stage0_instant_prob,
+        t_dist=t_dist,
+        r_dist=r_dist,
+        resample=args.stage0_resample,
         cfg_ratio=0.10,
         cfg_scale=2.0,
         # experimental

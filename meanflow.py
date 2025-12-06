@@ -69,8 +69,10 @@ class MeanFlow:
         normalizer=['minmax', None, None],
         # mean flow settings
         flow_ratio=0.50,
-        # time distribution, mu, sigma
-        time_dist=['lognorm', -0.4, 1.0],
+        # sampling configuration
+        t_dist=['lognorm', -0.4, 1.0],
+        r_dist=['lognorm', -0.4, 1.0],
+        resample=False,
         cfg_ratio=0.10,
         # set scale as none to disable CFG distill
         cfg_scale=2.0,
@@ -87,7 +89,10 @@ class MeanFlow:
         self.normer = Normalizer.from_list(normalizer)
 
         self.flow_ratio = flow_ratio
-        self.time_dist = time_dist
+        self.t_dist = t_dist
+        self.r_dist = r_dist
+        self.resample = resample
+        
         self.cfg_ratio = cfg_ratio
         self.w = cfg_scale
 
@@ -102,23 +107,48 @@ class MeanFlow:
             self.jvp_fn = torch.autograd.functional.jvp
             self.create_graph = True
 
-    # fix: r should be always not larger than t
+    def _sample_val(self, dist, batch_size):
+        if dist[0] == 'uniform':
+             return np.random.rand(batch_size).astype(np.float32)
+        elif dist[0] == 'lognorm':
+             mu, sigma = dist[1], dist[2]
+             normal_samples = np.random.randn(batch_size).astype(np.float32) * sigma + mu
+             return 1 / (1 + np.exp(-normal_samples))
+        else:
+            raise ValueError(f"Unknown distribution: {dist[0]}")
+
     def sample_t_r(self, batch_size, device):
-        if self.time_dist[0] == 'uniform':
-            samples = np.random.rand(batch_size, 2).astype(np.float32)
+        # 1. Sample t and r independently
+        t_np = self._sample_val(self.t_dist, batch_size)
+        r_np = self._sample_val(self.r_dist, batch_size)
 
-        elif self.time_dist[0] == 'lognorm':
-            mu, sigma = self.time_dist[-2], self.time_dist[-1]
-            normal_samples = np.random.randn(batch_size, 2).astype(np.float32) * sigma + mu
-            samples = 1 / (1 + np.exp(-normal_samples))  # Apply sigmoid
+        # 2. Handle ordering
+        if self.resample:
+             # Resample logic: strictly reject if r > t (we want t >= r for 1->0 flow logic in integration, 
+             # but here t is mixing coeff. 
+             # In loss: z = (1-t)x + t*e. t=1 is noise. t=0 is data.
+             # We flow from t (larger noise) to r (smaller noise)? 
+             # Original code: t_np = max, r_np = min. So t >= r.
+             # So we enforce t >= r.
+             mask = t_np < r_np
+             while np.any(mask):
+                 n_resample = np.sum(mask)
+                 t_np[mask] = self._sample_val(self.t_dist, n_resample)
+                 r_np[mask] = self._sample_val(self.r_dist, n_resample)
+                 mask = t_np < r_np
+        else:
+             # Default/Old logic: sort them
+             # This assumes they are 'interchangeable' or we just want an interval
+             t_max = np.maximum(t_np, r_np)
+             r_min = np.minimum(t_np, r_np)
+             t_np, r_np = t_max, r_min
 
-        # Assign t = max, r = min, for each pair
-        t_np = np.maximum(samples[:, 0], samples[:, 1])
-        r_np = np.minimum(samples[:, 0], samples[:, 1])
-
-        num_selected = int(self.flow_ratio * batch_size)
-        indices = np.random.permutation(batch_size)[:num_selected]
-        r_np[indices] = t_np[indices]
+        # 3. Flow Ratio (Instant Prob) logic
+        # Set r = t with probability 'flow_ratio'
+        if self.flow_ratio > 0:
+            num_selected = int(self.flow_ratio * batch_size)
+            indices = np.random.permutation(batch_size)[:num_selected]
+            r_np[indices] = t_np[indices]
 
         t = torch.tensor(t_np, device=device)
         r = torch.tensor(r_np, device=device)

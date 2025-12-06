@@ -57,7 +57,9 @@ if __name__ == '__main__':
                         image_size=32,
                         num_classes=10,
                         flow_ratio=0.50,
-                        time_dist=['lognorm', -0.4, 1.0],
+                        t_dist=['lognorm', -0.4, 1.0],
+                        r_dist=['lognorm', -0.4, 1.0],
+                        resample=False,
                         cfg_ratio=0.10,
                         cfg_scale=2.0,
                         # experimental

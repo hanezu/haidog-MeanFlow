@@ -79,7 +79,9 @@ if __name__ == '__main__':
                         num_classes=1000,
                         normalizer=['mean_std', 0.0, 1/latent_factor],
                         flow_ratio=0.50,
-                        time_dist=['lognorm', -0.4, 1.0],
+                        t_dist=['lognorm', -0.4, 1.0],
+                        r_dist=['lognorm', -0.4, 1.0],
+                        resample=False,
                         cfg_ratio=0.10,
                         cfg_scale=2.0,
                         # experimental
