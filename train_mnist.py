@@ -19,15 +19,7 @@ if __name__ == '__main__':
     parser.add_argument("--exp_name", type=str, default="default", help="Experiment name for logging")
     parser.add_argument("--n_steps", type=int, default=10000, help="Number of training steps")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--stage0_t_method", type=str, default="lognorm", help="Method for sampling t")
-    parser.add_argument("--stage0_t_mu", type=float, default=-0.4, help="Mu for t lognorm")
-    parser.add_argument("--stage0_t_sigma", type=float, default=1.0, help="Sigma for t lognorm")
-    parser.add_argument("--stage0_r_method", type=str, default="lognorm", help="Method for sampling r")
-    parser.add_argument("--stage0_r_lognorm_mu", type=float, default=-0.4, help="Mu for r lognorm")
-    parser.add_argument("--stage0_r_lognorm_sigma", type=float, default=1.0, help="Sigma for r lognorm")
-    parser.add_argument("--stage0_instant_prob", type=float, default=0.75, help="Probability of instant flow (flow_ratio)")
-    parser.add_argument("--stage0_resample", action="store_true", help="Enable resampling for ordering")
-    parser.add_argument("--stage0_phase_configs", type=str, help="Configuration for sampler")
+    parser.add_argument("--phase_configs", type=str, help="Configuration for sampler (supports multiple phases)")
     # CFG and Sampling arguments
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
@@ -91,19 +83,20 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.0)
 
-    phase_configs = load_yaml(args.stage0_phase_configs)
+    if args.phase_configs is None:
+        raise ValueError("--phase_configs is required; sampler settings must be provided via config file.")
 
-    # Configure distributions from args
-    t_dist = [args.stage0_t_method]
-    if args.stage0_t_method == 'lognorm':
-        t_dist.extend([args.stage0_t_mu, args.stage0_t_sigma])
-        
-    r_dist = [args.stage0_r_method]
-    if args.stage0_r_method == 'lognorm':
-        r_dist.extend([args.stage0_r_lognorm_mu, args.stage0_r_lognorm_sigma])
+    phase_configs = load_yaml(args.phase_configs)
 
     if accelerator.is_main_process:
-        print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
+        print("MeanFlow Sampler Config:")
+        for name, cfg in phase_configs.items():
+            t_cfg = cfg.get("t", {})
+            r_cfg = cfg.get("r", {})
+            print(f"  {name}: interval={cfg.get('interval')}, "
+                  f"t=({t_cfg.get('method')}, {t_cfg.get('config')}), "
+                  f"r=({r_cfg.get('method')}, {r_cfg.get('config')}), "
+                  f"instant_prob={cfg.get('instant_prob', 0.0)}, resample={cfg.get('resample', False)}")
         print(f"CFG Config: Scale={args.cfg_scale}, Ratio={args.cfg_ratio}, SampleSteps={args.sample_steps}")
         print(f"Training Config: Steps={n_steps}, BatchSize={batch_size}, GradAccum={args.gradient_accumulation_steps}")
 
@@ -114,12 +107,8 @@ if __name__ == '__main__':
         channels=1, # MNIST is grayscale
         image_size=image_size,
         num_classes=10,
-        flow_ratio=args.stage0_instant_prob,
         total_iterations=total_micro_steps,
         phase_configs=phase_configs,
-        t_dist=t_dist,
-        r_dist=r_dist,
-        resample=args.stage0_resample,
         cfg_ratio=args.cfg_ratio,
         cfg_scale=args.cfg_scale,
         # experimental

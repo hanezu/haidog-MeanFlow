@@ -12,4 +12,4 @@ python train_mnist.py \
     --cfg_scale 1.0 \
     --cfg_ratio 0.0 \
     --sample_steps 1 \
-    --stage0_phase_configs "configs/baseline.yaml"
+    --phase_configs "configs/baseline.yaml"

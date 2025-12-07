@@ -44,50 +44,50 @@ class SamplerScheduler:
     def __init__(self, total_iterations: int, phase_configs: dict):
         self.total_iterations = max(int(total_iterations), 1)
 
-        # Register initial stages
-        self.stages = []
+        # Register initial phases
+        self.phases = []
         for name, cfg in phase_configs.items():
-            self.register_stage(name, cfg)
+            self.register_phase(name, cfg)
 
-    def register_stage(self, name: str, stage_config: dict):
+    def register_phase(self, name: str, phase_config: dict):
         """
-        Register a stage.
+        Register a phase.
 
-        stage_config:
+        phase_config:
           - "interval": [start, end]
           - "t": {"method": str, "config": dict}
           - "r": {"method": str, "config": dict}
           - "instant_prob": float (optional): Probability to force r = t
           - "resample": bool (optional): If instant_prob specified, resample will determine wherther use a standard lognorm to resample the instant t and r
         """ 
-        start, end = stage_config["interval"]
+        start, end = phase_config["interval"]
 
         assert 0.0 <= start < end <= 1.0, "Invalid interval"
-        assert all(end <= stage['start'] or stage['end'] <= start for stage in self.stages), "Interval overlapped"
+        assert all(end <= phase['start'] or phase['end'] <= start for phase in self.phases), "Interval overlapped"
 
-        self.stages.append(
+        self.phases.append(
             {
                 "name": name,
                 "start": start,
                 "end": end,
-                "t_sampler": getattr(self, f"_construct_{stage_config['t']['method']}")(**stage_config['t']['config']),
-                "r_sampler": getattr(self, f"_construct_{stage_config['r']['method']}")(**stage_config['r']['config']),
-                "instant_prob": stage_config.get("instant_prob", 0.0),
-                "resample": stage_config.get("resample", False),
+                "t_sampler": getattr(self, f"_construct_{phase_config['t']['method']}")(**phase_config['t']['config']),
+                "r_sampler": getattr(self, f"_construct_{phase_config['r']['method']}")(**phase_config['r']['config']),
+                "instant_prob": phase_config.get("instant_prob", 0.0),
+                "resample": phase_config.get("resample", False),
             }
         )
 
-        self.stages.sort(key=lambda s: s["start"])
+        self.phases.sort(key=lambda s: s["start"])
 
     def _current_stage(self, iteration: int) -> dict:
         """
         Get current stage.
         """
         p = max(min(iteration, self.total_iterations - 1), 0) / (self.total_iterations - 1)
-        for s in self.stages:
+        for s in self.phases:
             if s["start"] <= p < s["end"]:
                 return s
-        return self.stages[-1]
+        return self.phases[-1]
 
     def sample(self, batch_size: int, iteration: int, device: str) -> List[float]:
         """
@@ -177,6 +177,8 @@ class MeanFlow:
         jvp_api='autograd',
     ):
         super().__init__()
+        if total_iterations is None or phase_configs is None:
+            raise ValueError("total_iterations and phase_configs must be provided via sampler config files.")
         self.channels = channels
         self.image_size = image_size
         self.num_classes = num_classes
@@ -215,41 +217,7 @@ class MeanFlow:
             raise ValueError(f"Unknown distribution: {dist[0]}")
 
     def sample_t_r(self, batch_size, device):
-        # 1. Sample t and r independently
-        t_np = self._sample_val(self.t_dist, batch_size)
-        r_np = self._sample_val(self.r_dist, batch_size)
-
-        # 2. Handle ordering
-        if self.resample:
-             # Resample logic: strictly reject if r > t (we want t >= r for 1->0 flow logic in integration, 
-             # but here t is mixing coeff. 
-             # In loss: z = (1-t)x + t*e. t=1 is noise. t=0 is data.
-             # We flow from t (larger noise) to r (smaller noise)? 
-             # Original code: t_np = max, r_np = min. So t >= r.
-             # So we enforce t >= r.
-             mask = t_np < r_np
-             while np.any(mask):
-                 n_resample = np.sum(mask)
-                 t_np[mask] = self._sample_val(self.t_dist, n_resample)
-                 r_np[mask] = self._sample_val(self.r_dist, n_resample)
-                 mask = t_np < r_np
-        else:
-             # Default/Old logic: sort them
-             # This assumes they are 'interchangeable' or we just want an interval
-             t_max = np.maximum(t_np, r_np)
-             r_min = np.minimum(t_np, r_np)
-             t_np, r_np = t_max, r_min
-
-        # 3. Flow Ratio (Instant Prob) logic
-        # Set r = t with probability 'flow_ratio'
-        if self.flow_ratio > 0:
-            num_selected = int(self.flow_ratio * batch_size)
-            indices = np.random.permutation(batch_size)[:num_selected]
-            r_np[indices] = t_np[indices]
-
-        t = torch.tensor(t_np, device=device)
-        r = torch.tensor(r_np, device=device)
-        return t, r
+        raise NotImplementedError("Sampling t/r directly is removed; provide sampler settings via config files.")
 
     def loss(self, model, iteration, x, c=None):
         batch_size = x.shape[0]

@@ -15,4 +15,4 @@ python train_mnist.py \
     --cfg_scale 2.0 \
     --cfg_ratio 0.1 \
     --sample_steps 5 \
-    --stage0_phase_configs "configs/haidog_baseline.yaml"
+    --phase_configs "configs/haidog_baseline.yaml"

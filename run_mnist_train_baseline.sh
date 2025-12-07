@@ -18,4 +18,4 @@ python train_mnist.py \
     --exp_name "baseline" \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
-    --stage0_phase_configs "configs/baseline.yaml"
+    --phase_configs "configs/baseline.yaml"

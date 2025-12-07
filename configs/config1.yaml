@@ -1,4 +1,4 @@
-stage_0:
+phase_0:
   interval:
   - 0.0
   - 0.3415386787820741
@@ -12,7 +12,7 @@ stage_0:
       sigma: 2.842653368505097
   instant_prob: 0.34587099570773694
   resample: false
-stage_1:
+phase_1:
   interval:
   - 0.3415386787820741
   - 0.6066097599937642
@@ -26,7 +26,7 @@ stage_1:
       sigma: 1.5542784285100266
   instant_prob: 0.4296647752966913
   resample: false
-stage_2:
+phase_2:
   interval:
   - 0.6066097599937642
   - 1.0

@@ -16,4 +16,4 @@ python train_mnist.py \
     --exp_name "t_uniform_r_lognorm_instant_prob_45_resample" \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
-    --stage0_phase_configs "configs/ours_1_phase.yaml"
+    --phase_configs "configs/ours_1_phase.yaml"
