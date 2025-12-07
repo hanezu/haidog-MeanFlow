@@ -33,6 +33,7 @@ if __name__ == '__main__':
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
     parser.add_argument("--sample_steps", type=int, default=5, help="Number of steps for sampling generation")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
+    parser.add_argument("--image_size", type=int, default=28, help="Image size for training (e.g. 32 or 28)")
     
     args = parser.parse_args()
 
@@ -40,7 +41,7 @@ if __name__ == '__main__':
     n_steps = args.n_steps
     # device = "cuda" if torch.cuda.is_available() else "cpu" # Handled by Accelerator
     batch_size = args.batch_size # batch_size=32 fits in a T4: ~14GB GPU memory
-    image_size = 32
+    image_size = args.image_size
     
     # Directories setup
     exp_dir = os.path.join("results", args.exp_name)

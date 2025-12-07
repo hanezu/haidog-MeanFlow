@@ -36,12 +36,13 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_all", action="store_true", help="Evaluate all checkpoints found in the directory.")
     parser.add_argument("--batch_size", type=int, default=100, help="Batch size for evaluation. 100 fits on a 16GB T4, 90s per batch. It takes 100 runs to finish evaluating on 10,000 test images (2.5 hrs)")
     parser.add_argument("--limit_batches", type=int, default=None, help="Limit number of batches to evaluate (None for evaluate all test dataset)")
+    parser.add_argument("--image_size", type=int, default=28, help="Image size for evaluation (e.g. 32 or 28)")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Using device: {device}")
-    image_size = 32
-    D = image_size * image_size * 1  # Dimensions
+    image_size = args.image_size
+    D = None # Derived from data
     
     # Paths
     exp_dir = os.path.join("results", args.exp_name)
@@ -124,6 +125,9 @@ if __name__ == "__main__":
                     break
                     
                 x = x.to(device)
+                if D is None:
+                    D = x[0].numel()
+                    
                 c_batch = y.to(device)
                 batch_size_curr = x.shape[0]
                 
