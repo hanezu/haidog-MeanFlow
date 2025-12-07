@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import re
 import pandas as pd
+import subprocess
 from IPython.display import display
 
 def parse_log_file(filepath):
@@ -86,8 +87,22 @@ def parse_eval_results(filepath):
                 
     return pd.DataFrame(data)
 
-def show_eval_results(eval_results_file):
-    """Displays evaluation results table and plots BPD curve if applicable."""
+def show_eval_results(eval_results_file, exp_name):
+    """
+    Displays evaluation results table and plots BPD curve.
+    If results file doesn't exist, it runs 'evaluate.py --ckpt_all' automatically.
+    """
+    if not os.path.exists(eval_results_file):
+        print(f"Evaluation results not found at {eval_results_file}.")
+        print(f"Running evaluation for experiment '{exp_name}' (all checkpoints)...")
+        try:
+            # Run evaluate.py with --ckpt_all to get full history
+            subprocess.run(["python", "evaluate.py", "--exp_name", exp_name, "--ckpt_all"], check=True)
+            print("Evaluation complete.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error running evaluation: {e}")
+            return
+
     df_eval = parse_eval_results(eval_results_file)
 
     if not df_eval.empty:
@@ -106,7 +121,7 @@ def show_eval_results(eval_results_file):
             plt.grid(True)
             plt.show()
     else:
-        print("No evaluation results found. Run 'evaluate.py' first.")
+        print("No evaluation results found even after attempting to run evaluation.")
 
 def show_generated_samples(images_dir):
     """Displays the generated sample image from the latest checkpoint."""
