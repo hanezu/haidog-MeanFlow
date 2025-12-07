@@ -40,9 +40,14 @@ It integrates the ODE (from data to noise) and uses the **Hutchinson Estimator**
 
 ### Usage
 
-To evaluate the "baseline" experiment:
+To evaluate the "baseline" experiment (latest checkpoint):
 ```bash
 python evaluate.py --exp_name baseline
+```
+
+To evaluate **all checkpoints** for the "baseline" experiment:
+```bash
+python evaluate.py --exp_name baseline --ckpt_all
 ```
 
 To evaluate the "ours" experiment:
@@ -53,6 +58,7 @@ python evaluate.py --exp_name t_uniform_r_lognorm_instant_prob_45_resample
 ### Arguments
 - `--exp_name`: (Required) The name of the experiment folder in `results/`.
 - `--ckpt_step`: (Optional) Specific checkpoint step to evaluate. Defaults to the latest checkpoint.
+- `--ckpt_all`: (Flag) If set, evaluates ALL checkpoints found in the experiment directory.
 - `--batch_size`: (Default: 16) Batch size for evaluation.
 - `--limit_batches`: (Default: 10) Number of batches to evaluate.
 

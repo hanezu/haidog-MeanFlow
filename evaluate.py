@@ -31,6 +31,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--ckpt_step", type=int, default=None, help="Step number of checkpoint. If None, uses latest.")
+    parser.add_argument("--ckpt_all", action="store_true", help="Evaluate all checkpoints found in the directory.")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for evaluation")
     parser.add_argument("--limit_batches", type=int, default=10, help="Limit number of batches to evaluate")
     args = parser.parse_args()
@@ -42,18 +43,31 @@ if __name__ == "__main__":
     exp_dir = os.path.join("results", args.exp_name)
     ckpt_dir = os.path.join(exp_dir, "checkpoints")
     
-    if args.ckpt_step is None:
-        files = [f for f in os.listdir(ckpt_dir) if f.endswith(".pt")]
-        if not files:
-            raise FileNotFoundError(f"No checkpoints found in {ckpt_dir}")
-        steps = [int(f.split("_")[1].split(".")[0]) for f in files]
-        latest_step = max(steps)
-        ckpt_path = os.path.join(ckpt_dir, f"step_{latest_step}.pt")
-        print(f"Using latest checkpoint: {ckpt_path}")
-    else:
-        ckpt_path = os.path.join(ckpt_dir, f"step_{args.ckpt_step}.pt")
+    # Paths
+    exp_dir = os.path.join("results", args.exp_name)
+    ckpt_dir = os.path.join(exp_dir, "checkpoints")
+    
+    # Determine which steps to evaluate
+    files = [f for f in os.listdir(ckpt_dir) if f.endswith(".pt")]
+    if not files:
+        raise FileNotFoundError(f"No checkpoints found in {ckpt_dir}")
         
-    # Load Model
+    all_steps = sorted([int(f.split("_")[1].split(".")[0]) for f in files])
+    
+    if args.ckpt_all:
+        steps_to_eval = all_steps
+        print(f"Evaluating all checkpoints: {steps_to_eval}")
+    elif args.ckpt_step is not None:
+        if args.ckpt_step not in all_steps:
+             print(f"Warning: Checkpoint step {args.ckpt_step} not found in directory. Available: {all_steps}")
+             # Let it fail naturally or skip? Usually failing is better if specific step requested.
+        steps_to_eval = [args.ckpt_step]
+    else:
+        # Latest only
+        steps_to_eval = [max(all_steps)]
+        print(f"Evaluating latest checkpoint: {steps_to_eval[0]}")
+
+    # Load Model Structure (once)
     model = MFDiT(
         input_size=image_size,
         patch_size=2,
@@ -63,12 +77,8 @@ if __name__ == "__main__":
         num_heads=6,
         num_classes=10,
     ).to(device)
-    
-    state_dict = torch.load(ckpt_path, map_location=device)
-    model.load_state_dict(state_dict)
-    model.eval()
-    
-    # Data
+
+    # Data (once)
     dataset = torchvision.datasets.MNIST(
         root="mnist",
         train=False, # Test set
@@ -78,83 +88,93 @@ if __name__ == "__main__":
             T.ToTensor(),
         ]),
     )
-    
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-    
-    # Evaluation Loop
-    total_nll = 0.0
-    total_bpd = 0.0
-    count = 0
-    
-    print(f"Evaluating Approximate NLL (Hutchinson) on {args.limit_batches} batches...")
-    
-    # Prior: Standard Normal
-    def log_normal_standard(z):
-        D = z.view(z.shape[0], -1).shape[1]
-        return -0.5 * (z ** 2).sum(dim=[1,2,3]) - 0.5 * D * math.log(2 * math.pi)
 
-    for i, (x, y) in enumerate(tqdm(dataloader, total=args.limit_batches)):
-        if i >= args.limit_batches:
-            break
-            
-        x = x.to(device)
-        c_batch = y.to(device)
-        
-        def ode_func(t, state):
-            x_t = state[0]
-            with torch.set_grad_enabled(True):
-                x_t.requires_grad_(True)
-                t_tensor = t.repeat(x_t.shape[0])
-                r_tensor = t_tensor.clone()
-                
-                v = model(x_t, t_tensor, r_tensor, y=c_batch)
-                
-                # Hutchinson Estimator Divergence
-                div = div_fn(v, x_t)
-                    
-                return v, div
-
-        # Integrate 0 (Data) -> 1 (Noise)
-        log_det_0 = torch.zeros(x.shape[0], device=device)
+    # Evaluation Loop over checkpoints
+    for step in steps_to_eval:
+        ckpt_path = os.path.join(ckpt_dir, f"step_{step}.pt")
+        print(f"\n--- Processing Checkpoint: Step {step} ---")
         
         try:
-            # Using rk4 with step_size=0.05
-            options = {'step_size': 0.05}
-            out = odeint(ode_func, (x, log_det_0), torch.tensor([0.0, 1.0], device=device), method='rk4', options=options)
+            state_dict = torch.load(ckpt_path, map_location=device)
+            model.load_state_dict(state_dict)
+            model.eval()
         except Exception as e:
-            print(f"Integration failed: {e}")
+            print(f"Failed to load checkpoint {ckpt_path}: {e}")
             continue
             
-        z_1 = out[0][-1] # Shape (B, C, H, W)
-        delta_log_det = out[1][-1] # Shape (B,)
+        total_nll = 0.0
+        total_bpd = 0.0
+        count = 0
         
-        # log p(x) = log p(z_1) + log |det dF/dx|
-        log_pz = log_normal_standard(z_1)
-        log_px = log_pz + delta_log_det
+        print(f"Evaluating Approximate NLL (Hutchinson) on {args.limit_batches} batches...")
         
-        nll = -log_px.mean().item()
-        
-        # BPD = NLL / (D * ln(2))
-        D = 32*32*1 
-        bpd = (nll / (D * math.log(2.0)))
-        
-        total_nll += nll
-        total_bpd += bpd
-        count += 1
-        
-    if count > 0:
-        avg_nll = total_nll / count
-        avg_bpd = total_bpd / count
-        print(f"\nResults for {args.exp_name} (Step {latest_step if args.ckpt_step is None else args.ckpt_step}):")
-        print(f"Average NLL: {avg_nll:.4f}")
-        print(f"Average BPD: {avg_bpd:.4f}")
-        
-        # Save results
-        res_file = os.path.join(exp_dir, "evaluation_results.txt")
-        with open(res_file, "a") as f:
-            f.write(f"Step {latest_step if args.ckpt_step is None else args.ckpt_step}:\n")
-            f.write(f"  NLL: {avg_nll:.4f}\n")
-            f.write(f"  BPD: {avg_bpd:.4f}\n\n")
+        # Prior: Standard Normal
+        def log_normal_standard(z):
+            D = z.view(z.shape[0], -1).shape[1]
+            return -0.5 * (z ** 2).sum(dim=[1,2,3]) - 0.5 * D * math.log(2 * math.pi)
+
+        for i, (x, y) in enumerate(tqdm(dataloader, total=args.limit_batches)):
+            if i >= args.limit_batches:
+                break
+                
+            x = x.to(device)
+            c_batch = y.to(device)
             
-    else:
-        print("No batches processed.")
+            def ode_func(t, state):
+                x_t = state[0]
+                with torch.set_grad_enabled(True):
+                    x_t.requires_grad_(True)
+                    t_tensor = t.repeat(x_t.shape[0])
+                    r_tensor = t_tensor.clone()
+                    
+                    v = model(x_t, t_tensor, r_tensor, y=c_batch)
+                    
+                    # Hutchinson Estimator Divergence
+                    div = div_fn(v, x_t)
+                        
+                    return v, div
+
+            # Integrate 0 (Data) -> 1 (Noise)
+            log_det_0 = torch.zeros(x.shape[0], device=device)
+            
+            try:
+                # Using rk4 with step_size=0.05
+                options = {'step_size': 0.05}
+                out = odeint(ode_func, (x, log_det_0), torch.tensor([0.0, 1.0], device=device), method='rk4', options=options)
+            except Exception as e:
+                print(f"Integration failed: {e}")
+                continue
+                
+            z_1 = out[0][-1] # Shape (B, C, H, W)
+            delta_log_det = out[1][-1] # Shape (B,)
+            
+            # log p(x) = log p(z_1) + log |det dF/dx|
+            log_pz = log_normal_standard(z_1)
+            log_px = log_pz + delta_log_det
+            
+            nll = -log_px.mean().item()
+            
+            # BPD = NLL / (D * ln(2))
+            D = 32*32*1 
+            bpd = (nll / (D * math.log(2.0)))
+            
+            total_nll += nll
+            total_bpd += bpd
+            count += 1
+            
+        if count > 0:
+            avg_nll = total_nll / count
+            avg_bpd = total_bpd / count
+            print(f"Results for {args.exp_name} (Step {step}):")
+            print(f"Average NLL: {avg_nll:.4f}")
+            print(f"Average BPD: {avg_bpd:.4f}")
+            
+            # Save results
+            res_file = os.path.join(exp_dir, "evaluation_results.txt")
+            with open(res_file, "a") as f:
+                f.write(f"Step {step}:\n")
+                f.write(f"  NLL: {avg_nll:.4f}\n")
+                f.write(f"  BPD: {avg_bpd:.4f}\n\n")
+        else:
+            print(f"No batches processed for step {step}.")
