@@ -12,11 +12,4 @@ python train_mnist.py \
     --cfg_scale 1.0 \
     --cfg_ratio 0.0 \
     --sample_steps 1 \
-    --stage0_t_method "lognorm" \
-    --stage0_t_mu -0.4 \
-    --stage0_t_sigma 1.0 \
-    --stage0_r_method "lognorm" \
-    --stage0_r_lognorm_mu -0.4 \
-    --stage0_r_lognorm_sigma 1.0 \
-    --stage0_instant_prob 0.75 \
-    # --stage0_resample is False by default
+    --stage0_phase_configs "configs/baseline.yaml"

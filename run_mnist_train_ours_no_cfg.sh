@@ -12,9 +12,4 @@ python train_mnist.py \
     --cfg_scale 1.0 \
     --cfg_ratio 0.0 \
     --sample_steps 1 \
-    --stage0_t_method "uniform" \
-    --stage0_r_method "lognorm" \
-    --stage0_r_lognorm_mu -2.7106086 \
-    --stage0_r_lognorm_sigma 1.3670615 \
-    --stage0_instant_prob 0.4480077 \
-    --stage0_resample
+    --stage0_phase_configs "configs/ours_1_phase.yaml"
