@@ -9,6 +9,8 @@ from meanflow import MeanFlow
 from accelerate import Accelerator
 import time
 import os
+from datetime import datetime
+import pytz
 
 
 if __name__ == '__main__':
@@ -136,7 +138,9 @@ if __name__ == '__main__':
 
             if accelerator.is_main_process:
                 if global_step % log_step == 0:
-                    current_time = time.asctime(time.localtime(time.time()))
+                    # current_time = time.asctime(time.localtime(time.time()))
+                    tz_pittsburgh = pytz.timezone('America/New_York')
+                    current_time = datetime.now(tz_pittsburgh).strftime('%a %b %d %H:%M:%S %Y')
                     batch_info = f'Global Step: {global_step}'
                     loss_info = f'Loss: {losses / log_step:.6f}    MSE_Loss: {mse_losses / log_step:.6f}'
 
