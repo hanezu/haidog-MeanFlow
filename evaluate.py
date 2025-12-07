@@ -36,7 +36,8 @@ if __name__ == "__main__":
     parser.add_argument("--limit_batches", type=int, default=10, help="Limit number of batches to evaluate")
     args = parser.parse_args()
     
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Using device: {device}")
     image_size = 32
     
     # Paths

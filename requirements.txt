@@ -7,3 +7,7 @@ timm
 torch
 torchvision
 tqdm
+pandas
+jupyterlab
+matplotlib
+torchdiffeq
