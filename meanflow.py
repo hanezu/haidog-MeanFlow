@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 from functools import partial
+from typing import List
 import numpy as np
 
 
@@ -39,6 +40,99 @@ class Normalizer:
             return x * self.std.to(x.device) + self.mean.to(x.device)
 
 
+class SamplerScheduler:
+    def __init__(self, total_iterations: int, phase_configs: dict):
+        self.total_iterations = max(int(total_iterations), 1)
+
+        # Register initial stages
+        self.stages = []
+        for name, cfg in phase_configs.items():
+            self.register_stage(name, cfg)
+
+    def register_stage(self, name: str, stage_config: dict):
+        """
+        Register a stage.
+
+        stage_config:
+          - "interval": [start, end]
+          - "t": {"method": str, "config": dict}
+          - "r": {"method": str, "config": dict}
+          - "instant_prob": float (optional): Probability to force r = t
+          - "resample": bool (optional): If instant_prob specified, resample will determine wherther use a standard lognorm to resample the instant t and r
+        """ 
+        start, end = stage_config["interval"]
+
+        assert 0.0 <= start < end <= 1.0, "Invalid interval"
+        assert all(end <= stage['start'] or stage['end'] <= start for stage in self.stages), "Interval overlapped"
+
+        self.stages.append(
+            {
+                "name": name,
+                "start": start,
+                "end": end,
+                "t_sampler": getattr(self, f"_construct_{stage_config['t']['method']}")(**stage_config['t']['config']),
+                "r_sampler": getattr(self, f"_construct_{stage_config['r']['method']}")(**stage_config['r']['config']),
+                "instant_prob": stage_config.get("instant_prob", 0.0),
+                "resample": stage_config.get("resample", False),
+            }
+        )
+
+        self.stages.sort(key=lambda s: s["start"])
+
+    def _current_stage(self, iteration: int) -> dict:
+        """
+        Get current stage.
+        """
+        p = max(min(iteration, self.total_iterations - 1), 0) / (self.total_iterations - 1)
+        for s in self.stages:
+            if s["start"] <= p < s["end"]:
+                return s
+        return self.stages[-1]
+
+    def sample(self, batch_size: int, iteration: int, device: str) -> List[float]:
+        """
+        Sample (r, t) from the corresponding stage according to iteration.
+        """
+        self.device = device
+        stage = self._current_stage(iteration)
+
+        t = stage["t_sampler"](batch_size)
+        r = stage["r_sampler"](batch_size)
+
+        return self._postprocess(r, t, stage)
+
+    def _postprocess(self, r: torch.Tensor, t: torch.Tensor, stage: dict) -> List[float]:
+        """
+        Guarantee r <= t; Optional: Guarantee |t - r| >= min_delta or partially set r == t.
+        """
+        # Apply strict equality for a percentage of the batch
+        if instant_prob := stage["instant_prob"]:
+            n = int(t.shape[0] * instant_prob)
+            instant_mask = torch.randperm(t.shape[0], device=self.device)[:n]
+            if stage["resample"]:
+                r[instant_mask] = t[instant_mask] = self._construct_lognorm(mu=-0.4, sigma=1)(n)
+            else:
+                r[instant_mask] = t[instant_mask]
+
+        # Guarantee r <= t
+        if (swap_mask := r > t).any():
+            r[swap_mask], t[swap_mask] = t[swap_mask], r[swap_mask]
+
+        return r, t
+
+    def _construct_uniform(self, **kwargs) -> callable:
+        """
+        Uniform distribution.
+        """
+        return lambda x: torch.rand(x, device=self.device)
+    
+    def _construct_lognorm(self, **kwargs) -> callable:
+        """
+        Lognorm distribution.
+        """
+        return lambda x: torch.sigmoid(torch.randn(x, device=self.device) * kwargs['sigma'] + kwargs['mu'])
+
+
 def stopgrad(x):
     return x.detach()
 
@@ -70,8 +164,10 @@ class MeanFlow:
         # mean flow settings
         flow_ratio=0.50,
         # sampling configuration
-        t_dist=['lognorm', -0.4, 1.0],
-        r_dist=['lognorm', -0.4, 1.0],
+        total_iterations=None,
+        phase_configs=None,
+        # t_dist=['lognorm', -0.4, 1.0],
+        # r_dist=['lognorm', -0.4, 1.0],
         resample=False,
         cfg_ratio=0.10,
         # set scale as none to disable CFG distill
@@ -88,9 +184,10 @@ class MeanFlow:
 
         self.normer = Normalizer.from_list(normalizer)
 
+        self.sampler = SamplerScheduler(total_iterations, phase_configs)
         self.flow_ratio = flow_ratio
-        self.t_dist = t_dist
-        self.r_dist = r_dist
+        # self.t_dist = t_dist
+        # self.r_dist = r_dist
         self.resample = resample
         
         self.cfg_ratio = cfg_ratio
@@ -154,11 +251,12 @@ class MeanFlow:
         r = torch.tensor(r_np, device=device)
         return t, r
 
-    def loss(self, model, x, c=None):
+    def loss(self, model, iteration, x, c=None):
         batch_size = x.shape[0]
         device = x.device
 
-        t, r = self.sample_t_r(batch_size, device)
+        # t, r = self.sample_t_r(batch_size, device)
+        r, t = self.sampler.sample(batch_size, iteration, device)
 
         t_ = rearrange(t, "b -> b 1 1 1").detach().clone()
         r_ = rearrange(r, "b -> b 1 1 1").detach().clone()
