@@ -23,7 +23,8 @@ if __name__ == '__main__':
     # CFG and Sampling arguments
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
-    parser.add_argument("--sample_steps", type=int, default=5, help="Number of steps for sampling generation")
+    parser.add_argument("--sample_steps", type=int, nargs='+', default=[1, 5],
+                        help="Number of steps for sampling generation (space-separated list, e.g., 1 5)")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     parser.add_argument("--image_size", type=int, default=28, help="Image size for training (e.g. 32 or 28)")
     
@@ -173,18 +174,14 @@ if __name__ == '__main__':
                 if global_step % sample_step == 0:
                     if accelerator.is_main_process:
                         model_module = model.module if hasattr(model, 'module') else model
-                        
-                        # Sample 1-step
-                        z1 = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=1)
-                        log_img1 = make_grid(z1, nrow=10)
-                        img_save_path1 = os.path.join(images_dir, f"1-step_{global_step}.png")
-                        save_image(log_img1, img_save_path1)
 
-                        # Sample 5-step
-                        z5 = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=5)
-                        log_img5 = make_grid(z5, nrow=10)
-                        img_save_path5 = os.path.join(images_dir, f"5-step_{global_step}.png")
-                        save_image(log_img5, img_save_path5)
+                        # Save samples for each requested step count
+                        sample_counts = list(dict.fromkeys(args.sample_steps))
+                        for steps in sample_counts:
+                            z = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=steps)
+                            log_img = make_grid(z, nrow=10)
+                            img_save_path = os.path.join(images_dir, f"{steps}-step_{global_step}.png")
+                            save_image(log_img, img_save_path)
                         
                         # Save checkpoint
                         ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")

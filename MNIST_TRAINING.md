@@ -76,7 +76,7 @@ You can adjust training hyperparameters via command-line arguments passed to `tr
 ### CFG & Generation
 - `--cfg_scale`: Classifier-Free Guidance scale (default: 2.0). Set to 1.0 for no guidance.
 - `--cfg_ratio`: Probability of dropping labels during training (default: 0.10). Set to 0.0 for no CFG training.
-- `--sample_steps`: Number of steps used for generation during training visualization (default: 5).
+- `--sample_steps`: Space-separated list of steps used for generation during training visualization (default: `1 5`). Each value produces its own grid (e.g., `1-step_XXXX.png`, `5-step_XXXX.png`).
 
 Example custom run:
 ```bash
