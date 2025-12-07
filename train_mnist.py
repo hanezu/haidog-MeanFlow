@@ -26,6 +26,10 @@ if __name__ == '__main__':
     parser.add_argument("--stage0_r_lognorm_sigma", type=float, default=1.0, help="Sigma for r lognorm")
     parser.add_argument("--stage0_instant_prob", type=float, default=0.50, help="Probability of instant flow (flow_ratio)")
     parser.add_argument("--stage0_resample", action="store_true", help="Enable resampling for ordering")
+    # CFG and Sampling arguments
+    parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
+    parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
+    parser.add_argument("--sample_steps", type=int, default=5, help="Number of steps for sampling generation")
     
     args = parser.parse_args()
 
@@ -94,6 +98,7 @@ if __name__ == '__main__':
 
     if accelerator.is_main_process:
         print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
+        print(f"CFG Config: Scale={args.cfg_scale}, Ratio={args.cfg_ratio}, SampleSteps={args.sample_steps}")
 
     # MeanFlow setup
     meanflow = MeanFlow(
@@ -104,8 +109,8 @@ if __name__ == '__main__':
         t_dist=t_dist,
         r_dist=r_dist,
         resample=args.stage0_resample,
-        cfg_ratio=0.10,
-        cfg_scale=2.0,
+        cfg_ratio=args.cfg_ratio,
+        cfg_scale=args.cfg_scale,
         # experimental
         cfg_uncond='u')
 
@@ -138,9 +143,7 @@ if __name__ == '__main__':
 
             if accelerator.is_main_process:
                 if global_step % log_step == 0:
-                    # current_time = time.asctime(time.localtime(time.time()))
-                    tz_pittsburgh = pytz.timezone('America/New_York')
-                    current_time = datetime.now(tz_pittsburgh).strftime('%a %b %d %H:%M:%S %Y')
+                    current_time = time.asctime(time.localtime(time.time()))
                     batch_info = f'Global Step: {global_step}'
                     loss_info = f'Loss: {losses / log_step:.6f}    MSE_Loss: {mse_losses / log_step:.6f}'
 
@@ -161,7 +164,7 @@ if __name__ == '__main__':
                 if accelerator.is_main_process:
                     model_module = model.module if hasattr(model, 'module') else model
                     # Sample digits 0-9
-                    z = meanflow.sample_each_class(model_module, 1, classes=list(range(10))) 
+                    z = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=args.sample_steps) 
                     log_img = make_grid(z, nrow=10)
                     img_save_path = os.path.join(images_dir, f"step_{global_step}.png")
                     save_image(log_img, img_save_path)
