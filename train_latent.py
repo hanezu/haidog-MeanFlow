@@ -89,7 +89,7 @@ if __name__ == '__main__':
 
     model, vae, optimizer, train_dataloader = accelerator.prepare(model, vae, optimizer, train_dataloader)
 
-    global_step = 0.0
+    global_step = 0
     losses = 0.0
     mse_losses = 0.0
 
