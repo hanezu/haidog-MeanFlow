@@ -32,6 +32,30 @@ The script will:
 3.  Create `checkpoints_mnist` to save model checkpoints.
 4.  Log training progress to `log_mnist.txt`.
 
+## Evaluation
+
+You can evaluate the trained models using `evaluate.py`. This script calculates the **Approximate Negative Log Likelihood (NLL)** and **Bits Per Dimension (BPD)** on the MNIST test set.
+
+It integrates the ODE (from data to noise) and uses the **Hutchinson Estimator** to efficiently approximate the divergence of the vector field. This is significantly faster than exact NLL computation.
+
+### Usage
+
+To evaluate the "baseline" experiment:
+```bash
+python evaluate.py --exp_name baseline
+```
+
+To evaluate the "ours" experiment:
+```bash
+python evaluate.py --exp_name t_uniform_r_lognorm_instant_prob_45_resample
+```
+
+### Arguments
+- `--exp_name`: (Required) The name of the experiment folder in `results/`.
+- `--ckpt_step`: (Optional) Specific checkpoint step to evaluate. Defaults to the latest checkpoint.
+- `--batch_size`: (Default: 16) Batch size for evaluation.
+- `--limit_batches`: (Default: 10) Number of batches to evaluate.
+
 ## Hyperparameter Adjustment
 
 You can adjust training hyperparameters via command-line arguments passed to `train_mnist.py`.
