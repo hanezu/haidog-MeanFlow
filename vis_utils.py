@@ -71,23 +71,38 @@ def parse_eval_results(filepath):
     current_step = None
     current_nll = None
     current_bpd = None
+    current_num_samples = None
     
     for line in lines:
         line = line.strip()
         if line.startswith("Step"):
             current_step = int(line.split()[1].replace(':', ''))
+        elif line.startswith("Num Samples"):
+            try:
+                current_num_samples = int(line.split(':')[1])
+            except ValueError:
+                current_num_samples = None
         elif line.startswith("NLL"):
             current_nll = float(line.split(':')[1])
         elif line.startswith("BPD"):
             current_bpd = float(line.split(':')[1])
             
             if current_step is not None:
-                data.append({"Step": current_step, "NLL": current_nll, "BPD": current_bpd})
+                entry = {
+                    "Step": current_step, 
+                    "NLL": current_nll, 
+                    "BPD": current_bpd
+                }
+                if current_num_samples is not None:
+                    entry["Num Samples"] = current_num_samples
+                
+                data.append(entry)
                 current_step = None
+                current_num_samples = None
                 
     return pd.DataFrame(data)
 
-def show_eval_results(eval_results_file, exp_name, ckpt_step=None, show_all=False):
+def show_eval_results(eval_results_file, exp_name, ckpt_step=None, show_all=False, batch_size=100, limit_batches=None):
     """
     Displays evaluation results table and plots BPD curve.
     
@@ -96,6 +111,8 @@ def show_eval_results(eval_results_file, exp_name, ckpt_step=None, show_all=Fals
         exp_name: Experiment name.
         ckpt_step: Specific checkpoint step to show/evaluate. If None, defaults to latest if show_all is False.
         show_all: If True, shows/evaluates all checkpoints. Overrides ckpt_step for evaluation scope.
+        batch_size: Batch size for evaluation.
+        limit_batches: Limit number of batches to evaluate.
     """
     
     # Check what we have currently
@@ -104,6 +121,11 @@ def show_eval_results(eval_results_file, exp_name, ckpt_step=None, show_all=Fals
     # Determine what needs to be evaluated
     needs_eval = False
     eval_args = ["python", "evaluate.py", "--exp_name", exp_name]
+    
+    if batch_size is not None:
+        eval_args.extend(["--batch_size", str(batch_size)])
+    if limit_batches is not None:
+        eval_args.extend(["--limit_batches", str(limit_batches)])
     
     if show_all:
         # We want all. If file doesn't exist or is empty, we definitely need eval.
@@ -178,7 +200,7 @@ from PIL import Image, ImageDraw, ImageFont
 import math
 
 def show_generated_samples(images_dir):
-    """Concatenates all generated sample images into a single vertical image with labels."""
+    """Concatenates generated sample images into a single vertical image with side-by-side 1-step and 5-step comparisons."""
     if not os.path.exists(images_dir):
         print(f"Images directory not found: {images_dir}")
         return
@@ -188,13 +210,13 @@ def show_generated_samples(images_dir):
         print("No image samples found.")
         return
 
-    # Parse files to get steps and types
-    # Structure: List of (step, type, filepath)
-    image_list = []
+    # Organize images by step
+    # images_by_step[step] = {'1-step': path, '5-step': path}
+    images_by_step = {}
 
     for f in files:
         step = -1
-        type_label = "default"
+        type_label = None
         
         if f.startswith("1-step_"):
             try:
@@ -206,31 +228,18 @@ def show_generated_samples(images_dir):
                 step = int(f.split('_')[1].split('.')[0])
                 type_label = "5-step"
             except ValueError: pass
-        elif f.startswith("step_"):
-            parts = f.split('_')
-            if len(parts) == 2:
-                try:
-                    step = int(parts[1].split('.')[0])
-                except ValueError: pass
-            elif len(parts) >= 3:
-                try:
-                    step = int(parts[1])
-                    type_label = parts[2].split('.')[0]
-                except ValueError: pass
+        # We can ignore 'default' step_X.png types as per instruction to focus on 1-step vs 5-step side-by-side
         
-        if step != -1:
-            image_list.append({'step': step, 'type': type_label, 'path': os.path.join(images_dir, f)})
+        if step != -1 and type_label:
+            if step not in images_by_step:
+                images_by_step[step] = {}
+            images_by_step[step][type_label] = os.path.join(images_dir, f)
 
-    if not image_list:
-        print("Could not parse valid images.")
+    if not images_by_step:
+        print("No 1-step or 5-step images found.")
         return
 
-    # Sort by step, then type
-    image_list.sort(key=lambda x: (x['step'], x['type']))
-
-    # Load images and add labels
-    loaded_images = []
-    max_width = 0
+    sorted_steps = sorted(images_by_step.keys())
     
     font_size = 20
     try:
@@ -238,53 +247,108 @@ def show_generated_samples(images_dir):
     except IOError:
         font = ImageFont.load_default()
 
-    for item in image_list:
-        try:
-            img = Image.open(item['path'])
-            
-            # Add label to the left
-            label_width = 80 # Adjust as needed
-            new_img = Image.new('RGB', (img.width + label_width, img.height), color='white')
-            new_img.paste(img, (label_width, 0))
-            
-            draw = ImageDraw.Draw(new_img)
-            if item['type'] == 'default':
-                label_text = f"Step: {item['step']}"
-            else:
-                label_text = f"Step: {item['step']}\nType: {item['type']}"
-            
-            # Center text vertically in the margin
-            # Get text bbox
-            bbox = draw.multiline_textbbox((0, 0), label_text, font=font)
-            text_height = bbox[3] - bbox[1]
-            y_text = (img.height - text_height) // 2
-            
-            draw.multiline_text((10, y_text), label_text, fill='black', font=font)
-            
-            loaded_images.append(new_img)
-            max_width = max(max_width, new_img.width)
-        except Exception as e:
-            print(f"Error loading {item['path']}: {e}")
+    label_width = 100
+    rows = []
+    max_row_width = 0
 
-    if not loaded_images:
+    for step in sorted_steps:
+        path_1 = images_by_step[step].get('1-step')
+        path_5 = images_by_step[step].get('5-step')
+        
+        img_1 = None
+        img_5 = None
+        
+        if path_1:
+            try:
+                img_1 = Image.open(path_1)
+            except Exception as e:
+                print(f"Error loading {path_1}: {e}")
+        
+        if path_5:
+            try:
+                img_5 = Image.open(path_5)
+            except Exception as e:
+                print(f"Error loading {path_5}: {e}")
+
+        if img_1 is None and img_5 is None:
+            continue
+
+        # Determine dimensions
+        h1 = img_1.height if img_1 else 0
+        w1 = img_1.width if img_1 else 0
+        h5 = img_5.height if img_5 else 0
+        w5 = img_5.width if img_5 else 0
+        
+        row_height = max(h1, h5)
+        # Row structure: [Label 1] [Img 1] [Label 5] [Img 5]
+        # Even if image is missing, we might want to preserve alignment if possible, 
+        # but simpler to just show what exists.
+        # However, "left to right" request implies structure.
+        # If img_1 is missing, we can output a blank space or just skip. 
+        # Let's assume standard width for missing images if we want alignment, 
+        # but variable width is easier.
+        
+        # Let's target alignment. Assuming images are same size usually.
+        # If one is missing, use the other's size for placeholder?
+        placeholder_w = w1 if w1 > 0 else (w5 if w5 > 0 else 0)
+        placeholder_h = row_height if row_height > 0 else 0
+        
+        current_w1 = w1 if img_1 else placeholder_w
+        current_w5 = w5 if img_5 else placeholder_w
+        
+        row_width = label_width + current_w1 + label_width + current_w5
+        row_img = Image.new('RGB', (row_width, row_height), color='white')
+        draw = ImageDraw.Draw(row_img)
+        
+        # 1-step section
+        x_offset = 0
+        # Label 1
+        text_1 = f"Step: {step}\nType: 1-step"
+        bbox1 = draw.multiline_textbbox((0, 0), text_1, font=font)
+        text_h1 = bbox1[3] - bbox1[1]
+        y_text1 = (row_height - text_h1) // 2
+        draw.multiline_text((x_offset + 5, y_text1), text_1, fill='black', font=font)
+        
+        x_offset += label_width
+        # Image 1
+        if img_1:
+            # Center vertically if needed
+            y_img1 = (row_height - img_1.height) // 2
+            row_img.paste(img_1, (x_offset, y_img1))
+        
+        x_offset += current_w1
+        
+        # 5-step section
+        # Label 5
+        text_5 = f"Step: {step}\nType: 5-step"
+        bbox5 = draw.multiline_textbbox((0, 0), text_5, font=font)
+        text_h5 = bbox5[3] - bbox5[1]
+        y_text5 = (row_height - text_h5) // 2
+        draw.multiline_text((x_offset + 5, y_text5), text_5, fill='black', font=font)
+        
+        x_offset += label_width
+        # Image 5
+        if img_5:
+            y_img5 = (row_height - img_5.height) // 2
+            row_img.paste(img_5, (x_offset, y_img5))
+            
+        rows.append(row_img)
+        max_row_width = max(max_row_width, row_width)
+
+    if not rows:
         return
 
-    # Concatenate vertically
-    total_height = sum(img.height for img in loaded_images)
+    # Concatenate rows
+    total_height = sum(r.height for r in rows)
+    final_image = Image.new('RGB', (max_row_width, total_height), color='white')
     
-    final_image = Image.new('RGB', (max_width, total_height), color='white')
-    
-    y_offset = 0
-    for img in loaded_images:
-        final_image.paste(img, (0, y_offset))
-        y_offset += img.height
-        
+    y_curr = 0
+    for r in rows:
+        final_image.paste(r, (0, y_curr))
+        y_curr += r.height
+
     # Display
-    # Adjust figsize to show detail. 
-    # Assuming standard image is ~300px wide, label adds ~250px. Total ~550px.
-    # Height depends on number of images.
-    # Display with a fixed width in notebook, scroll for height.
-    plt.figure(figsize=(12, len(loaded_images) * 4)) 
+    plt.figure(figsize=(20, len(rows) * 4)) # Wider figure for side-by-side
     plt.imshow(final_image)
     plt.axis('off')
     plt.show()

@@ -107,7 +107,7 @@ if __name__ == "__main__":
             
         total_nll = 0.0
         total_bpd = 0.0
-        count = 0
+        total_samples = 0
         
         print(f"Evaluating Approximate NLL (Hutchinson) on {args.limit_batches if args.limit_batches else 'all'} batches...")
         
@@ -125,6 +125,7 @@ if __name__ == "__main__":
                     
                 x = x.to(device)
                 c_batch = y.to(device)
+                batch_size_curr = x.shape[0]
                 
                 # 1. Dequantization
                 # x is in [0, 1], effectively discrete levels 0/255, 1/255...
@@ -191,14 +192,16 @@ if __name__ == "__main__":
                 nll = -log_px_disc.mean().item()
                 bpd = nll / (D * math.log(2.0))
                 
-                total_nll += nll
-                total_bpd += bpd
-                count += 1
+                # Weighted accumulation
+                total_nll += nll * batch_size_curr
+                total_bpd += bpd * batch_size_curr
+                total_samples += batch_size_curr
             
-        if count > 0:
-            avg_nll = total_nll / count
-            avg_bpd = total_bpd / count
+        if total_samples > 0:
+            avg_nll = total_nll / total_samples
+            avg_bpd = total_bpd / total_samples
             print(f"Results for {args.exp_name} (Step {step}):")
+            print(f"Num Samples: {total_samples}")
             print(f"Average NLL: {avg_nll:.4f}")
             print(f"Average BPD: {avg_bpd:.4f}")
             
@@ -206,6 +209,7 @@ if __name__ == "__main__":
             res_file = os.path.join(exp_dir, "evaluation_results.txt")
             with open(res_file, "a") as f:
                 f.write(f"Step {step}:\n")
+                f.write(f"  Num Samples: {total_samples}\n")
                 f.write(f"  NLL: {avg_nll:.4f}\n")
                 f.write(f"  BPD: {avg_bpd:.4f}\n\n")
         else:
