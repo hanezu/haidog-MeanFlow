@@ -11,6 +11,7 @@ import time
 import os
 from datetime import datetime
 import pytz
+from utils import load_yaml
 
 
 if __name__ == '__main__':
@@ -26,6 +27,7 @@ if __name__ == '__main__':
     parser.add_argument("--stage0_r_lognorm_sigma", type=float, default=1.0, help="Sigma for r lognorm")
     parser.add_argument("--stage0_instant_prob", type=float, default=0.50, help="Probability of instant flow (flow_ratio)")
     parser.add_argument("--stage0_resample", action="store_true", help="Enable resampling for ordering")
+    parser.add_argument("--stage0_phase_configs", type=str, help="Configuration for sampler")
     # CFG and Sampling arguments
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
@@ -88,6 +90,8 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.0)
 
+    phase_configs = load_yaml(args.stage0_phase_configs)
+
     # Configure distributions from args
     t_dist = [args.stage0_t_method]
     if args.stage0_t_method == 'lognorm':
@@ -102,12 +106,16 @@ if __name__ == '__main__':
         print(f"CFG Config: Scale={args.cfg_scale}, Ratio={args.cfg_ratio}, SampleSteps={args.sample_steps}")
         print(f"Training Config: Steps={n_steps}, BatchSize={batch_size}, GradAccum={args.gradient_accumulation_steps}")
 
+    total_micro_steps = n_steps * args.gradient_accumulation_steps
+
     # MeanFlow setup
     meanflow = MeanFlow(
         channels=1, # MNIST is grayscale
         image_size=image_size,
         num_classes=10,
         flow_ratio=args.stage0_instant_prob,
+        total_iterations=total_micro_steps,
+        phase_configs=phase_configs,
         t_dist=t_dist,
         r_dist=r_dist,
         resample=args.stage0_resample,
@@ -129,7 +137,6 @@ if __name__ == '__main__':
     # The loop runs micro-steps. If user wants 10k optimization steps, loop needs to run 10k * accum_steps.
     # Or we assume n_steps is total micro-steps? Usually n_steps is updates.
     # Let's explicitly loop for n_steps * accum_steps micro-steps.
-    total_micro_steps = n_steps * args.gradient_accumulation_steps
 
     with tqdm(range(total_micro_steps), dynamic_ncols=True) as pbar:
         pbar.set_description(f"Training {args.exp_name}")
@@ -140,7 +147,7 @@ if __name__ == '__main__':
                 x = data[0].to(accelerator.device)
                 c = data[1].to(accelerator.device)
 
-                loss, mse_val = meanflow.loss(model, x, c)
+                loss, mse_val = meanflow.loss(model, step, x, c)
 
                 accelerator.backward(loss)
                 optimizer.step()
