@@ -34,8 +34,8 @@ if __name__ == "__main__":
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--ckpt_step", type=int, default=None, help="Step number of checkpoint. If None, uses latest.")
     parser.add_argument("--ckpt_all", action="store_true", help="Evaluate all checkpoints found in the directory.")
-    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for evaluation (100 fits on a 16GB T4)")
-    parser.add_argument("--limit_batches", type=int, default=None, help="Limit number of batches to evaluate (None for all)")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for evaluation. 100 fits on a 16GB T4, 90s per batch. It takes 100 runs to finish evaluating on 10,000 test images (2.5 hrs)")
+    parser.add_argument("--limit_batches", type=int, default=None, help="Limit number of batches to evaluate (None for evaluate all test dataset)")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     # Evaluation Loop over checkpoints
-    for step in steps_to_eval:
+    for step in tqdm(steps_to_eval, desc="Evaluating Checkpoints"):
         ckpt_path = os.path.join(ckpt_dir, f"step_{step}.pt")
         print(f"\n--- Processing Checkpoint: Step {step} ---")
         
