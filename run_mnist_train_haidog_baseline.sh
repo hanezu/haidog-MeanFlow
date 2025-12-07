@@ -9,10 +9,8 @@ echo "Starting MeanFlow training on MNIST (Haidog's Baseline)..."
 
 python train_mnist.py \
     --exp_name "haidog_baseline" \
-    --n_steps 6000 \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
     --cfg_scale 2.0 \
     --cfg_ratio 0.1 \
-    --sample_steps 5 \
     --phase_configs "configs/haidog_baseline.yaml"
