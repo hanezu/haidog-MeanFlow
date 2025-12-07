@@ -87,32 +87,83 @@ def parse_eval_results(filepath):
                 
     return pd.DataFrame(data)
 
-def show_eval_results(eval_results_file, exp_name):
+def show_eval_results(eval_results_file, exp_name, ckpt_step=None, show_all=False):
     """
     Displays evaluation results table and plots BPD curve.
-    If results file doesn't exist, it runs 'evaluate.py --ckpt_all' automatically.
+    
+    Args:
+        eval_results_file: Path to the results file.
+        exp_name: Experiment name.
+        ckpt_step: Specific checkpoint step to show/evaluate. If None, defaults to latest if show_all is False.
+        show_all: If True, shows/evaluates all checkpoints. Overrides ckpt_step for evaluation scope.
     """
-    if not os.path.exists(eval_results_file):
-        print(f"Evaluation results not found at {eval_results_file}.")
-        print(f"Running evaluation for experiment '{exp_name}' (all checkpoints)...")
+    
+    # Check what we have currently
+    df_eval = parse_eval_results(eval_results_file)
+    
+    # Determine what needs to be evaluated
+    needs_eval = False
+    eval_args = ["python", "evaluate.py", "--exp_name", exp_name]
+    
+    if show_all:
+        # We want all. If file doesn't exist or is empty, we definitely need eval.
+        # If file exists, we assume it's up to date? Or should we check if all ckpts are present?
+        # For simplicity, if file missing/empty, run all.
+        if df_eval.empty:
+            needs_eval = True
+            eval_args.append("--ckpt_all")
+    else:
+        # We want specific step or latest
+        target_step = ckpt_step
+        
+        if target_step is None:
+            # Find latest checkpoint step from files to know what to look for
+            exp_dir = os.path.dirname(eval_results_file)
+            ckpt_dir = os.path.join(exp_dir, "checkpoints")
+            if os.path.exists(ckpt_dir):
+                files = [f for f in os.listdir(ckpt_dir) if f.endswith(".pt")]
+                if files:
+                    target_step = max([int(f.split("_")[1].split(".")[0]) for f in files])
+        
+        if target_step is not None:
+            # Check if this step is in df_eval
+            if df_eval.empty or target_step not in df_eval["Step"].values:
+                needs_eval = True
+                eval_args.extend(["--ckpt_step", str(target_step)])
+        else:
+            print("No checkpoints found to evaluate.")
+            return
+
+    if needs_eval:
+        print(f"Running evaluation for experiment '{exp_name}'...")
         try:
-            # Run evaluate.py with --ckpt_all to get full history
-            subprocess.run(["python", "evaluate.py", "--exp_name", exp_name, "--ckpt_all"], check=True)
+            subprocess.run(eval_args, check=True)
             print("Evaluation complete.")
+            # Reload results
+            df_eval = parse_eval_results(eval_results_file)
         except subprocess.CalledProcessError as e:
             print(f"Error running evaluation: {e}")
             return
 
-    df_eval = parse_eval_results(eval_results_file)
-
     if not df_eval.empty:
         # Sort by step
         df_eval = df_eval.sort_values("Step")
-        print("Evaluation Results:")
-        display(df_eval)
         
-        # Plot BPD over steps if multiple checkpoints evaluated
-        if len(df_eval) > 1:
+        # Filter display
+        if not show_all:
+            if ckpt_step is not None:
+                df_display = df_eval[df_eval["Step"] == ckpt_step]
+            else:
+                # Show latest
+                df_display = df_eval.iloc[[-1]]
+        else:
+            df_display = df_eval
+
+        print("Evaluation Results:")
+        display(df_display)
+        
+        # Plot BPD only if we have multiple points
+        if len(df_eval) > 1 and show_all:
             plt.figure(figsize=(8, 5))
             plt.plot(df_eval["Step"], df_eval["BPD"], marker='o', linestyle='-', color='green')
             plt.xlabel("Checkpoint Step")
@@ -121,26 +172,119 @@ def show_eval_results(eval_results_file, exp_name):
             plt.grid(True)
             plt.show()
     else:
-        print("No evaluation results found even after attempting to run evaluation.")
+        print("No evaluation results found.")
+
+from PIL import Image, ImageDraw, ImageFont
+import math
 
 def show_generated_samples(images_dir):
-    """Displays the generated sample image from the latest checkpoint."""
-    if os.path.exists(images_dir):
-        files = [f for f in os.listdir(images_dir) if f.endswith('.png')]
-        if files:
-            # Find the file with the highest step number
-            # Format: step_1000.png
-            steps = [int(f.split('_')[1].split('.')[0]) for f in files]
-            max_step = max(steps)
-            latest_img_path = os.path.join(images_dir, f"step_{max_step}.png")
-            
-            print(f"Displaying samples from step {max_step}:")
-            img = mpimg.imread(latest_img_path)
-            plt.figure(figsize=(15, 5))
-            plt.imshow(img)
-            plt.axis('off')
-            plt.show()
-        else:
-            print("No image samples found.")
-    else:
+    """Concatenates all generated sample images into a single vertical image with labels."""
+    if not os.path.exists(images_dir):
         print(f"Images directory not found: {images_dir}")
+        return
+
+    files = [f for f in os.listdir(images_dir) if f.endswith('.png')]
+    if not files:
+        print("No image samples found.")
+        return
+
+    # Parse files to get steps and types
+    # Structure: List of (step, type, filepath)
+    image_list = []
+
+    for f in files:
+        step = -1
+        type_label = "default"
+        
+        if f.startswith("1-step_"):
+            try:
+                step = int(f.split('_')[1].split('.')[0])
+                type_label = "1-step"
+            except ValueError: pass
+        elif f.startswith("5-step_"):
+            try:
+                step = int(f.split('_')[1].split('.')[0])
+                type_label = "5-step"
+            except ValueError: pass
+        elif f.startswith("step_"):
+            parts = f.split('_')
+            if len(parts) == 2:
+                try:
+                    step = int(parts[1].split('.')[0])
+                except ValueError: pass
+            elif len(parts) >= 3:
+                try:
+                    step = int(parts[1])
+                    type_label = parts[2].split('.')[0]
+                except ValueError: pass
+        
+        if step != -1:
+            image_list.append({'step': step, 'type': type_label, 'path': os.path.join(images_dir, f)})
+
+    if not image_list:
+        print("Could not parse valid images.")
+        return
+
+    # Sort by step, then type
+    image_list.sort(key=lambda x: (x['step'], x['type']))
+
+    # Load images and add labels
+    loaded_images = []
+    max_width = 0
+    
+    font_size = 20
+    try:
+        font = ImageFont.truetype("arial.ttf", font_size)
+    except IOError:
+        font = ImageFont.load_default()
+
+    for item in image_list:
+        try:
+            img = Image.open(item['path'])
+            
+            # Add label to the left
+            label_width = 80 # Adjust as needed
+            new_img = Image.new('RGB', (img.width + label_width, img.height), color='white')
+            new_img.paste(img, (label_width, 0))
+            
+            draw = ImageDraw.Draw(new_img)
+            if item['type'] == 'default':
+                label_text = f"Step: {item['step']}"
+            else:
+                label_text = f"Step: {item['step']}\nType: {item['type']}"
+            
+            # Center text vertically in the margin
+            # Get text bbox
+            bbox = draw.multiline_textbbox((0, 0), label_text, font=font)
+            text_height = bbox[3] - bbox[1]
+            y_text = (img.height - text_height) // 2
+            
+            draw.multiline_text((10, y_text), label_text, fill='black', font=font)
+            
+            loaded_images.append(new_img)
+            max_width = max(max_width, new_img.width)
+        except Exception as e:
+            print(f"Error loading {item['path']}: {e}")
+
+    if not loaded_images:
+        return
+
+    # Concatenate vertically
+    total_height = sum(img.height for img in loaded_images)
+    
+    final_image = Image.new('RGB', (max_width, total_height), color='white')
+    
+    y_offset = 0
+    for img in loaded_images:
+        final_image.paste(img, (0, y_offset))
+        y_offset += img.height
+        
+    # Display
+    # Adjust figsize to show detail. 
+    # Assuming standard image is ~300px wide, label adds ~250px. Total ~550px.
+    # Height depends on number of images.
+    # Display with a fixed width in notebook, scroll for height.
+    plt.figure(figsize=(12, len(loaded_images) * 4)) 
+    plt.imshow(final_image)
+    plt.axis('off')
+    plt.show()
