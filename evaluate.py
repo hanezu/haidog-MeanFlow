@@ -34,7 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--ckpt_step", type=int, default=None, help="Step number of checkpoint. If None, uses latest.")
     parser.add_argument("--ckpt_all", action="store_true", help="Evaluate all checkpoints found in the directory.")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for evaluation")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for evaluation (100 fits on a 16GB T4)")
     parser.add_argument("--limit_batches", type=int, default=None, help="Limit number of batches to evaluate (None for all)")
     args = parser.parse_args()
     
