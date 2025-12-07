@@ -16,6 +16,8 @@ echo "Starting MeanFlow training on MNIST (Baseline)..."
 
 python train_mnist.py \
     --exp_name "baseline" \
+    --batch_size 32 \
+    --gradient_accumulation_steps 4 \
     --stage0_t_method "lognorm" \
     --stage0_t_mu -0.4 \
     --stage0_t_sigma 1.0 \

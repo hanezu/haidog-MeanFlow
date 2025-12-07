@@ -30,6 +30,7 @@ if __name__ == '__main__':
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
     parser.add_argument("--sample_steps", type=int, default=5, help="Number of steps for sampling generation")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients")
     
     args = parser.parse_args()
 
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     
     os.makedirs(images_dir, exist_ok=True)
     os.makedirs(ckpt_dir, exist_ok=True)
-    accelerator = Accelerator(mixed_precision='fp16')
+    accelerator = Accelerator(mixed_precision='fp16', gradient_accumulation_steps=args.gradient_accumulation_steps)
 
     # MNIST Dataset
     dataset = torchvision.datasets.MNIST(
@@ -99,6 +100,7 @@ if __name__ == '__main__':
     if accelerator.is_main_process:
         print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
         print(f"CFG Config: Scale={args.cfg_scale}, Ratio={args.cfg_ratio}, SampleSteps={args.sample_steps}")
+        print(f"Training Config: Steps={n_steps}, BatchSize={batch_size}, GradAccum={args.gradient_accumulation_steps}")
 
     # MeanFlow setup
     meanflow = MeanFlow(
@@ -123,55 +125,66 @@ if __name__ == '__main__':
     log_step = 500
     sample_step = 1000
 
-    with tqdm(range(n_steps), dynamic_ncols=True) as pbar:
+    # Adjust n_steps to account for gradient accumulation (n_steps usually means optimization steps)
+    # The loop runs micro-steps. If user wants 10k optimization steps, loop needs to run 10k * accum_steps.
+    # Or we assume n_steps is total micro-steps? Usually n_steps is updates.
+    # Let's explicitly loop for n_steps * accum_steps micro-steps.
+    total_micro_steps = n_steps * args.gradient_accumulation_steps
+
+    with tqdm(range(total_micro_steps), dynamic_ncols=True) as pbar:
         pbar.set_description(f"Training {args.exp_name}")
         model.train()
         for step in pbar:
-            data = next(train_dataloader)
-            x = data[0].to(accelerator.device)
-            c = data[1].to(accelerator.device)
+            with accelerator.accumulate(model):
+                data = next(train_dataloader)
+                x = data[0].to(accelerator.device)
+                c = data[1].to(accelerator.device)
 
-            loss, mse_val = meanflow.loss(model, x, c)
+                loss, mse_val = meanflow.loss(model, x, c)
 
-            accelerator.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad()
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
 
-            global_step += 1
-            losses += loss.item()
-            mse_losses += mse_val.item()
+                # Accumulate metrics for logging (averaged over micro-steps implicitly or explicit?)
+                # Simple accumulation
+                losses += loss.item() / args.gradient_accumulation_steps
+                mse_losses += mse_val.item() / args.gradient_accumulation_steps
 
-            if accelerator.is_main_process:
-                if global_step % log_step == 0:
-                    current_time = time.asctime(time.localtime(time.time()))
-                    batch_info = f'Global Step: {global_step}'
-                    loss_info = f'Loss: {losses / log_step:.6f}    MSE_Loss: {mse_losses / log_step:.6f}'
-
-                    # Extract the learning rate from the optimizer
-                    lr = optimizer.param_groups[0]['lr']
-                    lr_info = f'Learning Rate: {lr:.6f}'
-
-                    log_message = f'{current_time}\n{batch_info}    {loss_info}    {lr_info}\n'
-                    print(f"\n{batch_info} {loss_info}") # Print to console as well
-
-                    with open(log_file, mode='a') as n:
-                        n.write(log_message)
-
-                    losses = 0.0
-                    mse_losses = 0.0
-
-            if global_step % sample_step == 0:
+            if accelerator.sync_gradients:
+                global_step += 1
+                
                 if accelerator.is_main_process:
-                    model_module = model.module if hasattr(model, 'module') else model
-                    # Sample digits 0-9
-                    z = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=args.sample_steps) 
-                    log_img = make_grid(z, nrow=10)
-                    img_save_path = os.path.join(images_dir, f"step_{global_step}.png")
-                    save_image(log_img, img_save_path)
+                    if global_step % log_step == 0:
+                        current_time = time.asctime(time.localtime(time.time()))
+                        batch_info = f'Global Step: {global_step}'
+                        loss_info = f'Loss: {losses / log_step:.6f}    MSE_Loss: {mse_losses / log_step:.6f}'
 
-                    # Save checkpoint
-                    ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")
-                    accelerator.save(model_module.state_dict(), ckpt_path)
-                accelerator.wait_for_everyone()
-                model.train()
+                        # Extract the learning rate from the optimizer
+                        lr = optimizer.param_groups[0]['lr']
+                        lr_info = f'Learning Rate: {lr:.6f}'
+
+                        log_message = f'{current_time}\n{batch_info}    {loss_info}    {lr_info}\n'
+                        print(f"\n{batch_info} {loss_info}") # Print to console as well
+
+                        with open(log_file, mode='a') as n:
+                            n.write(log_message)
+
+                        losses = 0.0
+                        mse_losses = 0.0
+
+                if global_step % sample_step == 0:
+                    if accelerator.is_main_process:
+                        model_module = model.module if hasattr(model, 'module') else model
+                        # Sample digits 0-9
+                        z = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=args.sample_steps) 
+                        log_img = make_grid(z, nrow=10)
+                        img_save_path = os.path.join(images_dir, f"step_{global_step}.png")
+                        save_image(log_img, img_save_path)
+
+                        # Save checkpoint
+                        ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")
+                        accelerator.save(model_module.state_dict(), ckpt_path)
+                    accelerator.wait_for_everyone()
+                    model.train()
                 

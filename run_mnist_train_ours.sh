@@ -14,6 +14,8 @@ echo "Starting MeanFlow training on MNIST (Ours - Best Trial)..."
 
 python train_mnist.py \
     --exp_name "t_uniform_r_lognorm_instant_prob_45_resample" \
+    --batch_size 32 \
+    --gradient_accumulation_steps 4 \
     --stage0_t_method "uniform" \
     --stage0_r_method "lognorm" \
     --stage0_r_lognorm_mu -2.7106086 \
