@@ -8,23 +8,44 @@ Ensure you have the required dependencies installed. This typically includes `to
 
 ## Files
 
-- **`train_mnist.py`**: The main Python script for training. It now accepts command-line arguments to control the sampling strategy and other hyperparameters.
-- **`run_mnist_train_baseline.sh`**: Launches training with **Baseline** hyperparameters (standard Lognorm sampling for both T and R).
-- **`run_mnist_train_ours.sh`**: Launches training with **Ours (Best)** hyperparameters (Uniform T, specific Lognorm R, Resampling enabled).
+- **`train_mnist.py`**: The main Python script for training. It now accepts command-line arguments to control the sampling strategy, CFG settings, and other hyperparameters.
+- **`run_mnist_train_baseline.sh`**: Baseline hyperparameters (Lognorm T/R) with CFG ($w=2.0$) and Optuna flow ratio (0.75).
+- **`run_mnist_train_ours.sh`**: Ours hyperparameters (Uniform T) with CFG ($w=2.0$) and Optuna flow ratio (0.75).
+- **`run_mnist_train_baseline_no_cfg.sh`**: Baseline hyperparameters without CFG ($w=1.0$).
+- **`run_mnist_train_ours_no_cfg.sh`**: Ours hyperparameters without CFG ($w=1.0$).
+- **`run_mnist_train_haidog_baseline.sh`**: Original "Haidog" stable parameters (Flow ratio 0.50) with Baseline sampling.
 
 ## How to Run Training
 
-### 1. Baseline Configuration
-To run the baseline configuration:
-```bash
-./run_mnist_train_baseline.sh
-```
+All scripts are configured to run for 6,000 steps with an effective batch size of 128 (using gradient accumulation on smaller GPUs).
 
-### 2. Ours (Best) Configuration
-To run the optimized configuration found via Optuna:
-```bash
-./run_mnist_train_ours.sh
-```
+### 1. Optuna-Derived Configurations (Flow Ratio 0.75)
+These configurations use the hyperparameters found via Optuna optimization on CIFAR/2D tasks.
+
+*   **Baseline (with CFG)**:
+    ```bash
+    ./run_mnist_train_baseline.sh
+    ```
+*   **Ours (with CFG)**:
+    ```bash
+    ./run_mnist_train_ours.sh
+    ```
+*   **Baseline (No CFG)**:
+    ```bash
+    ./run_mnist_train_baseline_no_cfg.sh
+    ```
+*   **Ours (No CFG)**:
+    ```bash
+    ./run_mnist_train_ours_no_cfg.sh
+    ```
+
+### 2. Haidog Stable Configurations (Flow Ratio 0.50)
+These configurations use the original `flow_ratio=0.50` which is known to be stable for this MNIST implementation.
+
+*   **Haidog Baseline**:
+    ```bash
+    ./run_mnist_train_haidog_baseline.sh
+    ```
 
 The script will:
 1.  Download the MNIST dataset (if not present) into a `mnist` directory.
@@ -68,13 +89,19 @@ You can adjust training hyperparameters via command-line arguments passed to `tr
 
 ### Key Arguments
 - `--n_steps`: Total training steps (default: 10000).
-- `--batch_size`: Batch size (default: 128).
+- `--batch_size`: Batch size per device (default: 32).
+- `--gradient_accumulation_steps`: Number of steps to accumulate gradients (default: 1).
 - `--stage0_instant_prob`: The "flow ratio" or probability of instant flow (default: 0.5).
 
 ### Sampling Strategy Arguments
 - `--stage0_t_method`: Method for sampling T (`lognorm` or `uniform`).
 - `--stage0_r_method`: Method for sampling R (`lognorm` or `uniform`).
 - `--stage0_resample`: Flag to enable resampling to strictly enforce ordering constraints (used in "Ours").
+
+### CFG & Generation
+- `--cfg_scale`: Classifier-Free Guidance scale (default: 2.0). Set to 1.0 for no guidance.
+- `--cfg_ratio`: Probability of dropping labels during training (default: 0.10). Set to 0.0 for no CFG training.
+- `--sample_steps`: Number of steps used for generation during training visualization (default: 5).
 
 Example custom run:
 ```bash
