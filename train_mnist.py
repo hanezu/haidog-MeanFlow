@@ -25,14 +25,14 @@ if __name__ == '__main__':
     parser.add_argument("--stage0_r_method", type=str, default="lognorm", help="Method for sampling r")
     parser.add_argument("--stage0_r_lognorm_mu", type=float, default=-0.4, help="Mu for r lognorm")
     parser.add_argument("--stage0_r_lognorm_sigma", type=float, default=1.0, help="Sigma for r lognorm")
-    parser.add_argument("--stage0_instant_prob", type=float, default=0.50, help="Probability of instant flow (flow_ratio)")
+    parser.add_argument("--stage0_instant_prob", type=float, default=0.75, help="Probability of instant flow (flow_ratio)")
     parser.add_argument("--stage0_resample", action="store_true", help="Enable resampling for ordering")
     parser.add_argument("--stage0_phase_configs", type=str, help="Configuration for sampler")
     # CFG and Sampling arguments
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
     parser.add_argument("--sample_steps", type=int, default=5, help="Number of steps for sampling generation")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     
     args = parser.parse_args()
 
