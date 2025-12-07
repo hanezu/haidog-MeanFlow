@@ -173,18 +173,23 @@ if __name__ == '__main__':
                         losses = 0.0
                         mse_losses = 0.0
 
-                if global_step % sample_step == 0:
-                    if accelerator.is_main_process:
-                        model_module = model.module if hasattr(model, 'module') else model
-                        # Sample digits 0-9
-                        z = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=args.sample_steps) 
-                        log_img = make_grid(z, nrow=10)
-                        img_save_path = os.path.join(images_dir, f"step_{global_step}.png")
-                        save_image(log_img, img_save_path)
-
-                        # Save checkpoint
-                        ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")
-                        accelerator.save(model_module.state_dict(), ckpt_path)
-                    accelerator.wait_for_everyone()
-                    model.train()
-                
+                            if global_step % sample_step == 0:
+                                if accelerator.is_main_process:
+                                    model_module = model.module if hasattr(model, 'module') else model
+                                    
+                                                        # Sample 1-step
+                                                        z1 = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=1)
+                                                        log_img1 = make_grid(z1, nrow=10)
+                                                        img_save_path1 = os.path.join(images_dir, f"1-step_{global_step}.png")
+                                                        save_image(log_img1, img_save_path1)
+                                    
+                                                        # Sample 5-step
+                                                        z5 = meanflow.sample_each_class(model_module, 1, classes=list(range(10)), sample_steps=5)
+                                                        log_img5 = make_grid(z5, nrow=10)
+                                                        img_save_path5 = os.path.join(images_dir, f"5-step_{global_step}.png")
+                                                        save_image(log_img5, img_save_path5)                
+                                    # Save checkpoint
+                                    ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")
+                                    accelerator.save(model_module.state_dict(), ckpt_path)
+                                accelerator.wait_for_everyone()
+                                model.train()                
