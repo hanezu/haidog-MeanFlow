@@ -15,6 +15,7 @@ echo "Starting MeanFlow training on MNIST (Baseline)..."
 # 'stage0_resample': False
 
 python train_mnist.py \
+    --exp_name "baseline" \
     --stage0_t_method "lognorm" \
     --stage0_t_mu -0.4 \
     --stage0_t_sigma 1.0 \

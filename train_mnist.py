@@ -13,6 +13,7 @@ import os
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train MeanFlow on MNIST")
+    parser.add_argument("--exp_name", type=str, default="default", help="Experiment name for logging")
     parser.add_argument("--n_steps", type=int, default=10000, help="Number of training steps")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--stage0_t_method", type=str, default="lognorm", help="Method for sampling t")
@@ -32,8 +33,17 @@ if __name__ == '__main__':
     batch_size = args.batch_size # batch_size=32 fits in a T4: ~14GB GPU memory
     image_size = 32
     
-    os.makedirs('images_mnist', exist_ok=True)
-    os.makedirs('checkpoints_mnist', exist_ok=True)
+    # Directories setup
+    exp_dir = os.path.join("results", args.exp_name)
+    images_dir = os.path.join(exp_dir, "images")
+    ckpt_dir = os.path.join(exp_dir, "checkpoints")
+    log_file = os.path.join(exp_dir, "log.txt")
+    
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print(f"Experiment Directory: {exp_dir}")
+    
+    os.makedirs(images_dir, exist_ok=True)
+    os.makedirs(ckpt_dir, exist_ok=True)
     accelerator = Accelerator(mixed_precision='fp16')
 
     # MNIST Dataset
@@ -80,7 +90,8 @@ if __name__ == '__main__':
     if args.stage0_r_method == 'lognorm':
         r_dist.extend([args.stage0_r_lognorm_mu, args.stage0_r_lognorm_sigma])
 
-    print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
+    if accelerator.is_main_process:
+        print(f"MeanFlow Config: T={t_dist}, R={r_dist}, FlowRatio={args.stage0_instant_prob}, Resample={args.stage0_resample}")
 
     # MeanFlow setup
     meanflow = MeanFlow(
@@ -106,7 +117,7 @@ if __name__ == '__main__':
     sample_step = 1000
 
     with tqdm(range(n_steps), dynamic_ncols=True) as pbar:
-        pbar.set_description("Training MNIST")
+        pbar.set_description(f"Training {args.exp_name}")
         model.train()
         for step in pbar:
             data = next(train_dataloader)
@@ -136,7 +147,7 @@ if __name__ == '__main__':
                     log_message = f'{current_time}\n{batch_info}    {loss_info}    {lr_info}\n'
                     print(f"\n{batch_info} {loss_info}") # Print to console as well
 
-                    with open('log_mnist.txt', mode='a') as n:
+                    with open(log_file, mode='a') as n:
                         n.write(log_message)
 
                     losses = 0.0
@@ -148,11 +159,12 @@ if __name__ == '__main__':
                     # Sample digits 0-9
                     z = meanflow.sample_each_class(model_module, 1, classes=list(range(10))) 
                     log_img = make_grid(z, nrow=10)
-                    img_save_path = f"images_mnist/step_{global_step}.png"
+                    img_save_path = os.path.join(images_dir, f"step_{global_step}.png")
                     save_image(log_img, img_save_path)
+
+                    # Save checkpoint
+                    ckpt_path = os.path.join(ckpt_dir, f"step_{global_step}.pt")
+                    accelerator.save(model_module.state_dict(), ckpt_path)
                 accelerator.wait_for_everyone()
                 model.train()
                 
-    if accelerator.is_main_process:
-        ckpt_path = f"checkpoints_mnist/step_{global_step}.pt"
-        accelerator.save(model_module.state_dict(), ckpt_path)

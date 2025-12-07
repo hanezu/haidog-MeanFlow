@@ -53,6 +53,10 @@ python train_mnist.py --stage0_t_method uniform --stage0_r_method uniform --stag
 
 ## Output
 
-- **Logs**: Check `log_mnist.txt` or the console output for loss values.
-- **Samples**: Check `images_mnist/` for generated images.
-- **Checkpoints**: Saved in `checkpoints_mnist/` at the end of training.
+All outputs are now organized by experiment name under the `results/` directory.
+
+- **Logs**: Saved to `results/{exp_name}/log.txt`.
+- **Samples**: Saved to `results/{exp_name}/images/` for generated images.
+- **Checkpoints**: Saved to `results/{exp_name}/checkpoints/` at the end of training.
+
+For example, running the baseline script will produce outputs in `results/baseline/`.
