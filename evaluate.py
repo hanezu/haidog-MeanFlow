@@ -27,27 +27,30 @@ def div_fn(u, x):
     return div
 
 if __name__ == "__main__":
+    # Reproducibility
+    torch.manual_seed(0)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp_name", type=str, required=True)
     parser.add_argument("--ckpt_step", type=int, default=None, help="Step number of checkpoint. If None, uses latest.")
     parser.add_argument("--ckpt_all", action="store_true", help="Evaluate all checkpoints found in the directory.")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for evaluation")
-    parser.add_argument("--limit_batches", type=int, default=10, help="Limit number of batches to evaluate")
+    parser.add_argument("--limit_batches", type=int, default=None, help="Limit number of batches to evaluate (None for all)")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Using device: {device}")
     image_size = 32
-    
-    # Paths
-    exp_dir = os.path.join("results", args.exp_name)
-    ckpt_dir = os.path.join(exp_dir, "checkpoints")
+    D = image_size * image_size * 1  # Dimensions
     
     # Paths
     exp_dir = os.path.join("results", args.exp_name)
     ckpt_dir = os.path.join(exp_dir, "checkpoints")
     
     # Determine which steps to evaluate
+    if not os.path.exists(ckpt_dir):
+         raise FileNotFoundError(f"Checkpoint directory not found: {ckpt_dir}")
+
     files = [f for f in os.listdir(ckpt_dir) if f.endswith(".pt")]
     if not files:
         raise FileNotFoundError(f"No checkpoints found in {ckpt_dir}")
@@ -60,7 +63,6 @@ if __name__ == "__main__":
     elif args.ckpt_step is not None:
         if args.ckpt_step not in all_steps:
              print(f"Warning: Checkpoint step {args.ckpt_step} not found in directory. Available: {all_steps}")
-             # Let it fail naturally or skip? Usually failing is better if specific step requested.
         steps_to_eval = [args.ckpt_step]
     else:
         # Latest only
@@ -107,20 +109,31 @@ if __name__ == "__main__":
         total_bpd = 0.0
         count = 0
         
-        print(f"Evaluating Approximate NLL (Hutchinson) on {args.limit_batches} batches...")
+        print(f"Evaluating Approximate NLL (Hutchinson) on {args.limit_batches if args.limit_batches else 'all'} batches...")
         
         # Prior: Standard Normal
         def log_normal_standard(z):
-            D = z.view(z.shape[0], -1).shape[1]
+            # z shape: [B, C, H, W]
+            # D is passed or inferred
             return -0.5 * (z ** 2).sum(dim=[1,2,3]) - 0.5 * D * math.log(2 * math.pi)
 
         with torch.no_grad():
-            for i, (x, y) in enumerate(tqdm(dataloader, total=args.limit_batches)):
-                if i >= args.limit_batches:
+            total_batches = args.limit_batches if args.limit_batches is not None else len(dataloader)
+            for i, (x, y) in enumerate(tqdm(dataloader, total=total_batches)):
+                if args.limit_batches is not None and i >= args.limit_batches:
                     break
                     
                 x = x.to(device)
                 c_batch = y.to(device)
+                
+                # 1. Dequantization
+                # x is in [0, 1], effectively discrete levels 0/255, 1/255...
+                x_disc = (x * 255.0).floor()
+                u = torch.rand_like(x_disc)
+                x_deq = (x_disc + u) / 256.0 # in [0, 1)
+
+                # 2. Normalization to [-1, 1] (match training)
+                x_norm = x_deq * 2 - 1
                 
                 def ode_func(t, state):
                     x_t = state[0]
@@ -129,6 +142,7 @@ if __name__ == "__main__":
                         t_tensor = t.repeat(x_t.shape[0])
                         r_tensor = t_tensor.clone()
                         
+                        # Model predicts vector field v(x_t)
                         v = model(x_t, t_tensor, r_tensor, y=c_batch)
                         
                         # Hutchinson Estimator Divergence
@@ -142,7 +156,7 @@ if __name__ == "__main__":
                 try:
                     # Using rk4 with step_size=0.05
                     options = {'step_size': 0.05}
-                    out = odeint(ode_func, (x, log_det_0), torch.tensor([0.0, 1.0], device=device), method='rk4', options=options)
+                    out = odeint(ode_func, (x_norm, log_det_0), torch.tensor([0.0, 1.0], device=device), method='rk4', options=options)
                 except Exception as e:
                     print(f"Integration failed: {e}")
                     continue
@@ -150,15 +164,32 @@ if __name__ == "__main__":
                 z_1 = out[0][-1] # Shape (B, C, H, W)
                 delta_log_det = out[1][-1] # Shape (B,)
                 
-                # log p(x) = log p(z_1) + log |det dF/dx|
+                # log p(z_1)
                 log_pz = log_normal_standard(z_1)
-                log_px = log_pz + delta_log_det
                 
-                nll = -log_px.mean().item()
+                # log p(x_norm) = log p(z_1) + log |det dF/dx|
+                # Note: delta_log_det accumulates div(v). For CNF: log p(x) = log p(z) - integral(div). 
+                # But torchdiffeq integrates forward 0->1.
+                # if dz/dt = v(z,t), then d(log p)/dt = -div(v).
+                # log p(z1) - log p(z0) = integral_0^1 -div(v) dt
+                # log p(z0) = log p(z1) + integral_0^1 div(v) dt
+                # out[1] is integral of whatever correct quantity.
+                # The code assumes delta_log_det is correct.
                 
-                # BPD = NLL / (D * ln(2))
-                D = 32*32*1 
-                bpd = (nll / (D * math.log(2.0)))
+                log_px_norm = log_pz + delta_log_det # continuous density on [-1, 1]
+                
+                # Change of variables: x_norm = 2 * x_deq - 1
+                # log p(x_deq) = log p(x_norm) + log |d(x_norm)/d(x_deq)|
+                # |d(x_norm)/d(x_deq)| = 2^D
+                log_px_deq = log_px_norm + D * math.log(2.0)
+                
+                # Discrete correction
+                # log P_disc = log p(x_deq) - D * log(256)
+                deq_const = D * math.log(256.0)
+                log_px_disc = log_px_deq - deq_const
+                
+                nll = -log_px_disc.mean().item()
+                bpd = nll / (D * math.log(2.0))
                 
                 total_nll += nll
                 total_bpd += bpd
