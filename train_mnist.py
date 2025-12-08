@@ -82,6 +82,21 @@ if __name__ == '__main__':
         num_classes=10,
     ).to(accelerator.device)
 
+    # Resume from checkpoint if available
+    global_step = 0
+    if os.path.isdir(ckpt_dir):
+        checkpoints = [f for f in os.listdir(ckpt_dir) if f.startswith('step_') and f.endswith('.pt')]
+        if len(checkpoints) > 0:
+            checkpoints.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+            latest_ckpt = checkpoints[-1]
+            ckpt_path = os.path.join(ckpt_dir, latest_ckpt)
+            global_step = int(latest_ckpt.split('_')[1].split('.')[0])
+            
+            if accelerator.is_main_process:
+                print(f"Resuming from checkpoint: {ckpt_path} (Step {global_step})")
+            
+            model.load_state_dict(torch.load(ckpt_path, map_location=accelerator.device))
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.0)
 
     if args.phase_configs is None:
@@ -102,6 +117,7 @@ if __name__ == '__main__':
         print(f"Training Config: Steps={n_steps}, BatchSize={batch_size}, GradAccum={args.gradient_accumulation_steps}")
 
     total_micro_steps = n_steps * args.gradient_accumulation_steps
+    start_micro_step = global_step * args.gradient_accumulation_steps
 
     # MeanFlow setup
     meanflow = MeanFlow(
@@ -117,7 +133,6 @@ if __name__ == '__main__':
 
     model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
 
-    global_step = 0
     losses = 0.0
     mse_losses = 0.0
 
@@ -129,7 +144,7 @@ if __name__ == '__main__':
     # Or we assume n_steps is total micro-steps? Usually n_steps is updates.
     # Let's explicitly loop for n_steps * accum_steps micro-steps.
 
-    with tqdm(range(total_micro_steps), dynamic_ncols=True) as pbar:
+    with tqdm(range(start_micro_step, total_micro_steps), dynamic_ncols=True) as pbar:
         pbar.set_description(f"Training {args.exp_name}")
         model.train()
         for step in pbar:
