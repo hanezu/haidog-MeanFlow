@@ -163,3 +163,4 @@ cython_debug/
 
 mnist/MNIST/raw
 results
+pretrained

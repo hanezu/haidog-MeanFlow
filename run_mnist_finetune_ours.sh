@@ -18,6 +18,6 @@ python train_mnist.py \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
     --phase_configs "configs/ours_1_phase.yaml" \
-    --resume_from "pretrained/baseline_10k.pt" \
+    --resume_from "pretrained/baseline_10k_28x28.pt" \
     --n_steps 5000 \
     --lr 1e-5
