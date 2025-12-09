@@ -16,5 +16,4 @@ python train_mnist.py \
     --exp_name "ours_1_phase" \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
-    --cfg_uncond "v" \
     --phase_configs "configs/ours_1_phase.yaml"
