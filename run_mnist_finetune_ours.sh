@@ -13,11 +13,15 @@ echo "Starting MeanFlow finetuning on MNIST (Ours - Finetune)..."
 # 'stage0_instant_prob': 0.44800769613418734
 # 'stage0_resample': True
 
+EXP_NAME="ours_1_phase_finetune_5k"
+
 python train_mnist.py \
-    --exp_name "ours_1_phase_finetune_5k" \
+    --exp_name "$EXP_NAME" \
     --batch_size 64 \
     --gradient_accumulation_steps 2 \
     --phase_configs "configs/ours_1_phase.yaml" \
     --resume_from "pretrained/baseline_10k_28x28.pt" \
     --n_steps 5000 \
     --lr 1e-5
+
+python evaluate.py --exp_name "$EXP_NAME" --batch_size 200 --ckpt_all --limit_batches 5
