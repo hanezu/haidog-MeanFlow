@@ -23,6 +23,7 @@ if __name__ == '__main__':
     # CFG and Sampling arguments
     parser.add_argument("--cfg_scale", type=float, default=2.0, help="Classifier-Free Guidance scale (1.0 for no guidance)")
     parser.add_argument("--cfg_ratio", type=float, default=0.10, help="Probability of dropping labels for CFG training")
+    parser.add_argument("--cfg_uncond", type=str, default="u", choices=['u', 'v'], help="Target for unconditional samples ('u': guided mixture, 'v': ground truth velocity)")
     parser.add_argument("--sample_steps", type=int, nargs='+', default=[1, 5],
                         help="Number of steps for sampling generation (space-separated list, e.g., 1 5)")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
@@ -129,7 +130,7 @@ if __name__ == '__main__':
         cfg_ratio=args.cfg_ratio,
         cfg_scale=args.cfg_scale,
         # experimental
-        cfg_uncond='u')
+        cfg_uncond=args.cfg_uncond)
 
     model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
 

@@ -13,7 +13,8 @@ echo "Starting MeanFlow training on MNIST (Ours - Best Trial)..."
 # 'stage0_resample': True
 
 python train_mnist.py \
-    --exp_name "t_uniform_r_lognorm_instant_prob_45_resample" \
+    --exp_name "ours_1_phase" \
     --batch_size 32 \
     --gradient_accumulation_steps 4 \
+    --cfg_uncond "v" \
     --phase_configs "configs/ours_1_phase.yaml"
