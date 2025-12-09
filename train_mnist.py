@@ -28,6 +28,8 @@ if __name__ == '__main__':
                         help="Number of steps for sampling generation (space-separated list, e.g., 1 5)")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=4, help="Number of steps to accumulate gradients")
     parser.add_argument("--image_size", type=int, default=28, help="Image size for training (e.g. 32 or 28)")
+    parser.add_argument("--resume_from", type=str, default=None, help="Path to checkpoint to resume from (overrides automatic resume)")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     
     args = parser.parse_args()
 
@@ -85,7 +87,12 @@ if __name__ == '__main__':
 
     # Resume from checkpoint if available
     global_step = 0
-    if os.path.isdir(ckpt_dir):
+    if args.resume_from:
+        if accelerator.is_main_process:
+            print(f"Loading checkpoint from: {args.resume_from}")
+        # Load checkpoint but do not update global_step (treat as new training / finetuning)
+        model.load_state_dict(torch.load(args.resume_from, map_location=accelerator.device))
+    elif os.path.isdir(ckpt_dir):
         checkpoints = [f for f in os.listdir(ckpt_dir) if f.startswith('step_') and f.endswith('.pt')]
         if len(checkpoints) > 0:
             checkpoints.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
@@ -98,7 +105,7 @@ if __name__ == '__main__':
             
             model.load_state_dict(torch.load(ckpt_path, map_location=accelerator.device))
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
 
     if args.phase_configs is None:
         raise ValueError("--phase_configs is required; sampler settings must be provided via config file.")
